@@ -1,26 +1,99 @@
 const Review = require("../models/Review");
 const ReviewLog = require("../models/ReviewLog");
+const User = require("../models/User");
 
-// GET REVIEWER STATS
+// ==========================
+// ✅ 1. ADMIN STATS
+// ==========================
 exports.getReviewerStats = async (req, res) => {
-  const stats = await Review.aggregate([
-    {
-      $group: {
-        _id: "$status.updatedBy",
-        approved: {
-          $sum: { $cond: [{ $eq: ["$status.type", "approved"] }, 1, 0] }
-        },
-        rejected: {
-          $sum: { $cond: [{ $eq: ["$status.type", "rejected"] }, 1, 0] }
+  try {
+    const reviewers = await User.find({ role: "reviewer" });
+
+    const stats = await Review.aggregate([
+      {
+        $group: {
+          _id: "$assignedTo",
+          approved: {
+            $sum: {
+              $cond: [{ $eq: ["$status.type", "approved"] }, 1, 0]
+            }
+          },
+          rejected: {
+            $sum: {
+              $cond: [{ $eq: ["$status.type", "rejected"] }, 1, 0]
+            }
+          },
+          pending: {
+            $sum: {
+              $cond: [{ $eq: ["$isLocked", true] }, 1, 0]
+            }
+          }
         }
       }
-    }
-  ]);
+    ]);
 
-  res.json(stats);
+    const result = reviewers.map((reviewer) => {
+      const stat = stats.find(
+        (s) => s._id?.toString() === reviewer._id.toString()
+      );
+
+      return {
+        reviewerId: reviewer._id,
+        name: reviewer.name,
+        email: reviewer.email,
+        approved: stat?.approved || 0,
+        rejected: stat?.rejected || 0,
+        pending: stat?.pending || 0
+      };
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch stats" });
+  }
 };
 
+// ==========================
+// ✅ 2. REVIEWER DETAILS
+// ==========================
+exports.getReviewerDetails = async (req, res) => {
+  try {
+    const { reviewerId } = req.params;
+
+    // Approved
+    const approved = await Review.find({
+      assignedTo: reviewerId,
+      "status.type": "approved"
+    }).select("aiPrompt aiOutput status.updatedAt");
+
+    // Rejected
+    const rejected = await Review.find({
+      assignedTo: reviewerId,
+      "status.type": "rejected"
+    }).select("aiPrompt aiOutput status.updatedAt");
+
+    // Pending (locked)
+    const pending = await Review.find({
+      assignedTo: reviewerId,
+      isLocked: true
+    }).select("aiPrompt aiOutput createdAt");
+
+    res.json({
+      approved,
+      rejected,
+      pending
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch reviewer details" });
+  }
+};
+
+// ==========================
 // ADMIN MODIFY
+// ==========================
 exports.adminModify = async (req, res) => {
   const { decision, comment } = req.body;
 
@@ -46,7 +119,9 @@ exports.adminModify = async (req, res) => {
   res.json({ msg: "Updated by admin" });
 };
 
+// ==========================
 // REASSIGN
+// ==========================
 exports.reassign = async (req, res) => {
   const { reviewerId } = req.body;
 
