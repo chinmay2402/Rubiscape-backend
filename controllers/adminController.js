@@ -25,7 +25,7 @@ exports.getReviewerStats = async (req, res) => {
           },
           pending: {
             $sum: {
-              $cond: [{ $eq: ["$isLocked", true] }, 1, 0]
+              $cond: [{ $eq: ["$status.type", null] }, 1, 0]
             }
           }
         }
@@ -73,10 +73,10 @@ exports.getReviewerDetails = async (req, res) => {
       "status.type": "rejected"
     }).select("aiPrompt aiOutput status.updatedAt");
 
-    // Pending (locked)
+    // Pending (all items with no status decision)
     const pending = await Review.find({
       assignedTo: reviewerId,
-      isLocked: true
+      "status.type": null
     }).select("aiPrompt aiOutput createdAt");
 
     res.json({
@@ -84,7 +84,6 @@ exports.getReviewerDetails = async (req, res) => {
       rejected,
       pending
     });
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch reviewer details" });
@@ -95,42 +94,79 @@ exports.getReviewerDetails = async (req, res) => {
 // ADMIN MODIFY
 // ==========================
 exports.adminModify = async (req, res) => {
-  const { decision, comment } = req.body;
+  try {
+    const { decision, comment } = req.body;
+    const review = await Review.findById(req.params.id);
 
-  const review = await Review.findById(req.params.id);
+    if (!review) return res.status(404).json({ error: "Review not found" });
 
-  review.status = {
-    type: decision,
-    updatedBy: "admin",
-    updatedAt: new Date(),
-    comment
-  };
+    if (decision === 'pending') {
+      // ✅ "Send Back" logic: reset status to null and unlock
+      review.status = {
+        type: null,
+        updatedBy: "admin",
+        updatedAt: new Date(),
+        comment
+      };
+      review.isLocked = false;
+    } else {
+      review.status = {
+        type: decision,
+        updatedBy: "admin",
+        updatedAt: new Date(),
+        comment
+      };
+    }
 
-  await review.save();
+    await review.save();
 
-  await ReviewLog.create({
-    reviewId: review._id,
-    action: "admin_modified",
-    comment,
-    performedBy: req.user.id,
-    role: "admin"
-  });
+    await ReviewLog.create({
+      reviewId: review._id,
+      action: "admin_modified",
+      comment,
+      performedBy: req.user.id,
+      role: "admin"
+    });
 
-  res.json({ msg: "Updated by admin" });
+    res.json({ msg: "Updated by admin" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to modify review" });
+  }
 };
 
 // ==========================
 // REASSIGN
 // ==========================
 exports.reassign = async (req, res) => {
-  const { reviewerId } = req.body;
+  try {
+    const { reviewerId } = req.body;
+    const review = await Review.findById(req.params.id);
 
-  const review = await Review.findById(req.params.id);
+    if (!review) return res.status(404).json({ error: "Review not found" });
 
-  review.assignedTo = reviewerId;
-  review.isLocked = false;
+    review.assignedTo = reviewerId;
+    review.isLocked = false;
 
-  await review.save();
+    await review.save();
 
-  res.json({ msg: "Reassigned" });
+    res.json({ msg: "Reassigned" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to reassign review" });
+  }
+};
+
+// ==========================
+// UNASSIGNED TASKS
+// ==========================
+exports.getUnassignedTasks = async (req, res) => {
+  try {
+    const unassigned = await Review.find({ assignedTo: null })
+      .select("aiPrompt aiOutput createdAt");
+    res.json(unassigned);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch unassigned tasks" });
+  }
 };

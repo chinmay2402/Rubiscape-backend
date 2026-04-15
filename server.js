@@ -6,6 +6,8 @@ const http = require("http");
 const { Server } = require("socket.io");
 
 const app = express();
+const cors = require("cors");
+app.use(cors());
 app.use(express.json());
 
 mongoose.connect(process.env.MONGO_URI)

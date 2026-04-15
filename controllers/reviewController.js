@@ -41,15 +41,15 @@ exports.createReview = async (req, res) => {
 
 // GET REVIEWER TASKS
 exports.getReviewerTasks = async (req, res) => {
-const reviews = await Review.find({
-  isLocked: false,
-  $or: [
-    { "status.type": null },
-    { "status.updatedBy": req.user.name }
-  ]
-});
-
-  res.json(reviews);
+  try {
+    const reviews = await Review.find({
+      assignedTo: req.user.id
+    });
+    res.json(reviews);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch tasks" });
+  }
 };
 
 // LOCK REVIEW
