@@ -1,7 +1,8 @@
+require("dotenv").config();
 const mongoose = require("mongoose");
 const Review = require("./models/Review"); 
 
-const MONGO_URI = "mongodb+srv://chinmay24csk:Chinmay%40123@cluster0.sxunue2.mongodb.net/rubiProject";
+const MONGO_URI = process.env.MONGO_URI;
 
 async function verify() {
   try {
