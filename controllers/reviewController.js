@@ -1,41 +1,27 @@
 const Review = require("../models/Review");
 const ReviewLog = require("../models/ReviewLog");
-const flowable = require("../services/flowableService");
 
-// CREATE REVIEW + START FLOWABLE
+// CREATE REVIEW
 exports.createReview = async (req, res) => {
   try {
     const { aiPrompt, aiOutput } = req.body;
 
-    // 1. Save in Mongo
-    const review = await Review.create({ aiPrompt, aiOutput });
-
-    // 2. Start Flowable process
-    const processRes = await flowable.startProcess(review._id.toString());
-
-    // 3. Wait a bit (Flowable async)
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // 4. Fetch task from Flowable
-    const taskRes = await flowable.getTasks();
-
-    const task = taskRes.data.data.find(t =>
-      t.processInstanceId === processRes.data.id
-    );
-
-    if (!task) {
-      return res.status(500).json({ error: "Task not created" });
-    }
-
-    // 5. Store taskId in Mongo
-    review.flowableTaskId = task.id;
-    await review.save();
+    // Save in Mongo with explicit pending status
+    const review = await Review.create({ 
+      aiPrompt, 
+      aiOutput,
+      status: { 
+        state: "pending", 
+        updatedAt: new Date(),
+        comment: "Initial submission"
+      }
+    });
 
     res.json(review);
 
   } catch (err) {
-    console.error("Error:", err.response?.data || err.message);
-    res.status(500).json({ error: "Flowable integration failed" });
+    console.error("Error creating review:", err.message);
+    res.status(500).json({ error: "Failed to create review" });
   }
 };
 
@@ -43,7 +29,10 @@ exports.createReview = async (req, res) => {
 exports.getReviewerTasks = async (req, res) => {
   try {
     const reviews = await Review.find({
-      assignedTo: req.user.id
+      $or: [
+        { assignedTo: req.user.id },
+        { assignedTo: null, isLocked: false }
+      ]
     });
     res.json(reviews);
   } catch (err) {
@@ -54,85 +43,167 @@ exports.getReviewerTasks = async (req, res) => {
 
 // LOCK REVIEW
 exports.lockReview = async (req, res) => {
-  const review = await Review.findById(req.params.id);
-  const io = req.app.get("io");
+  try {
+    const review = await Review.findById(req.params.id);
+    const io = req.app.get("io");
 
-  if (review.isLocked && review.assignedTo?.toString() !== req.user.id) {
-    return res.status(400).json({ msg: "Already locked" });
+    if (!review) return res.status(404).json({ msg: "Review not found" });
+
+    if (review.isLocked && review.lockedBy?.toString() !== req.user.id) {
+       return res.status(400).json({ msg: "Already locked by another reviewer" });
+    }
+
+    review.isLocked = true;
+    review.lockedBy = req.user.id;
+    review.lockedAt = new Date();
+    
+    // AUTO-TRANSITION TO UNDER_REVIEW
+    review.status.state = "under_review";
+    review.status.updatedBy = req.user.name;
+    review.status.updatedAt = new Date();
+    review.status.comment = "Reviewer picked up the task";
+
+    // If it was unassigned, assign it to the locker
+    if (!review.assignedTo) {
+      review.assignedTo = req.user.id;
+    }
+
+    review.markModified('status');
+    await review.save();
+
+    // LOG Action
+    await ReviewLog.create({
+      reviewId: review._id,
+      action: "locked",
+      performedBy: req.user.id,
+      role: "reviewer",
+      snapshot: {
+        aiPrompt: review.aiPrompt,
+        aiOutput: review.aiOutput,
+        status: review.status
+      }
+    });
+
+    io.emit("reviewLocked", {
+      reviewId: review._id,
+      lockedBy: req.user.id
+    });
+    
+    res.json(review);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Lock failed" });
   }
+};
 
-  review.isLocked = true;
-  review.assignedTo = req.user.id;
+// UNLOCK REVIEW
+exports.unlockReview = async (req, res) => {
+  try {
+    const review = await Review.findById(req.params.id);
+    const io = req.app.get("io");
 
-  await review.save();
-  io.emit("reviewLocked", {
-    reviewId: review._id,
-    assignedTo: req.user.id
-  });
-  res.json(review);
+    if (!review) return res.status(404).json({ msg: "Review not found" });
+    if (!review.isLocked) return res.json({ msg: "Not locked" });
+
+    if (review.lockedBy?.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ msg: "Not authorized to unlock" });
+    }
+
+    review.isLocked = false;
+    review.lockedBy = null;
+    review.lockedAt = null;
+
+    // RESET TO GLOBAL POOL
+    review.status = {
+      state: "pending",
+      updatedBy: req.user.name,
+      updatedAt: new Date(),
+      comment: "Lock released by reviewer"
+    };
+    review.assignedTo = null;
+
+    review.markModified('status');
+    await review.save();
+
+    // LOG Action
+    await ReviewLog.create({
+      reviewId: review._id,
+      action: "unlocked",
+      performedBy: req.user.id,
+      role: req.user.role,
+      snapshot: {
+        aiPrompt: review.aiPrompt,
+        aiOutput: review.aiOutput,
+        status: review.status
+      }
+    });
+
+    io.emit("reviewUnlocked", { reviewId: review._id });
+    res.json({ msg: "Unlocked successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Unlock failed" });
+  }
 };
 
 // SUBMIT REVIEW
 exports.submitReview = async (req, res) => {
   try {
     const { decision, comment } = req.body;
-
     const review = await Review.findById(req.params.id);
 
-    if (!review.flowableTaskId) {
-      return res.status(400).json({ msg: "No Flowable task linked" });
+    if (!review) {
+      return res.status(404).json({ msg: "Review not found" });
     }
 
-    // 🔥 STEP 1: Map decision (IMPORTANT)
-    let flowableDecision;
+    // Update Mongo Status
+    review.status.state = decision;
+    review.status.updatedBy = req.user.name;
+    review.status.updatedAt = new Date();
+    review.status.comment = comment;
 
-    if (decision === "approved") flowableDecision = "approve";
-    else if (decision === "rejected") flowableDecision = "reject";
-    else flowableDecision = "needs_review";
-
-    // 2. Update Mongo (keep your format)
-    review.status = {
-      type: decision,
-      updatedBy: req.user.name,
-      updatedAt: new Date(),
-      comment
-    };
-
+    // Clear Locks
     review.isLocked = false;
+    review.lockedBy = null;
+    review.lockedAt = null;
 
+    review.markModified('status');
     await review.save();
+    
     const io = req.app.get("io");
+    io.emit("reviewUpdated", {
+      reviewId: review._id,
+      status: review.status
+    });
 
-io.emit("reviewUpdated", {
-  reviewId: review._id,
-  status: review.status
-});
-
-    // 3. Log
+    // Log the decision
     await ReviewLog.create({
       reviewId: review._id,
       action: decision,
       comment,
       performedBy: req.user.id,
-      role: "reviewer"
+      role: "reviewer",
+      snapshot: {
+        aiPrompt: review.aiPrompt,
+        aiOutput: review.aiOutput,
+        status: review.status
+      }
     });
-
-    // 🔥 STEP 2: Send mapped value to Flowable
-    await flowable.completeTask(review.flowableTaskId, flowableDecision);
-
-    // 4. Clear taskId
-    review.flowableTaskId = null;
-    await review.save();
 
     res.json({ msg: "Review submitted successfully" });
 
   } catch (err) {
-    console.error(err.response?.data || err.message);
+    console.error("Submit error:", err.message);
     res.status(500).json({ error: "Submit failed" });
   }
 };
 
 exports.getLogs = async (req, res) => {
-  const logs = await ReviewLog.find({ reviewId: req.params.id });
-  res.json(logs);
+  try {
+    const logs = await ReviewLog.find({ reviewId: req.params.id })
+      .populate("performedBy", "name role");
+    res.json(logs);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch logs" });
+  }
 };

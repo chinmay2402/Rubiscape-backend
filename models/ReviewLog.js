@@ -6,7 +6,12 @@ const logSchema = new mongoose.Schema({
   action: String,
   comment: String,
   performedBy: mongoose.Schema.Types.ObjectId,
-  role: String
+  role: String,
+  snapshot: {
+    aiPrompt: String,
+    aiOutput: String,
+    status: Object
+  }
 }, { timestamps: true });
 
 module.exports = mongoose.model("ReviewLog", logSchema);

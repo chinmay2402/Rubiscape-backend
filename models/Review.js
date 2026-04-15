@@ -6,10 +6,10 @@ const reviewSchema = new mongoose.Schema({
   aiOutput: String,
 
   status: {
-    type: {
+    state: {
       type: String,
-      enum: ["approved", "rejected", "needs_review", null],
-      default: null
+      enum: ["approved", "rejected", "under_review", "pending"],
+      default: "pending"
     },
     updatedBy: String,
     updatedAt: Date,
@@ -27,10 +27,16 @@ const reviewSchema = new mongoose.Schema({
     default: false
   },
 
-  flowableTaskId: {
-  type: String,
-  default: null
-}
+  lockedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    default: null
+  },
+
+  lockedAt: {
+    type: Date,
+    default: null
+  }
 }, { timestamps: true });
 
 module.exports = mongoose.model("Review", reviewSchema);

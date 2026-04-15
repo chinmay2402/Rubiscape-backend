@@ -4,6 +4,7 @@ const router = express.Router();
 const {
   getReviewerStats,
   getReviewerDetails,
+  getAllTasks,
   adminModify,
   reassign,
   getUnassignedTasks
@@ -13,6 +14,7 @@ const auth = require("../middleware/auth");
 
 router.get("/stats", auth, getReviewerStats);
 router.get("/unassigned", auth, getUnassignedTasks);
+router.get("/tasks", auth, getAllTasks);
 
 // 🔥 NEW ROUTE
 router.get("/:reviewerId/details", auth, getReviewerDetails);
