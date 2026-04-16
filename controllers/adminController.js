@@ -72,28 +72,26 @@ exports.getReviewerDetails = async (req, res) => {
     const approved = await Review.find({
       assignedTo: reviewerId,
       "status.state": "approved"
-    }).select("aiPrompt aiOutput status.updatedAt");
+    });
 
     // Rejected
     const rejected = await Review.find({
       assignedTo: reviewerId,
       "status.state": "rejected"
-    }).select("aiPrompt aiOutput status.updatedAt");
+    });
 
     // Pending (all items with no status decision)
     const pending = await Review.find({
       assignedTo: reviewerId,
       "status.state": "pending"
-    }).select("aiPrompt aiOutput createdAt isLocked lockedBy")
-    .populate("lockedBy", "name")
+    }).populate("lockedBy", "name")
     .populate("assignedTo", "name");
 
     // Under Review
     const underReview = await Review.find({
       assignedTo: reviewerId,
       "status.state": "under_review"
-    }).select("aiPrompt aiOutput status.updatedAt isLocked lockedBy")
-    .populate("lockedBy", "name")
+    }).populate("lockedBy", "name")
     .populate("assignedTo", "name");
 
     res.json({
@@ -180,6 +178,7 @@ exports.adminModify = async (req, res) => {
       action: decision === 'send_back' ? 'sent_back' : 'admin_modified',
       comment,
       performedBy: req.user.id,
+      assignedTo: review.assignedTo,
       role: "admin",
       snapshot: {
         aiPrompt: review.aiPrompt,
@@ -219,6 +218,21 @@ exports.reassign = async (req, res) => {
     };
 
     await review.save();
+    
+    // 🔥 LOG REASSIGNMENT
+    await ReviewLog.create({
+      reviewId: review._id,
+      action: "reassigned",
+      comment: "Task reassigned by admin",
+      performedBy: req.user.id,
+      assignedTo: reviewerId,
+      role: "admin",
+      snapshot: {
+        aiPrompt: review.aiPrompt,
+        aiOutput: review.aiOutput,
+        status: review.status
+      }
+    });
 
     res.json({ msg: "Reassigned" });
   } catch (err) {
@@ -232,8 +246,7 @@ exports.reassign = async (req, res) => {
 // ==========================
 exports.getUnassignedTasks = async (req, res) => {
   try {
-    const unassigned = await Review.find({ assignedTo: null })
-      .select("aiPrompt aiOutput createdAt status");
+    const unassigned = await Review.find({ assignedTo: null });
     res.json(unassigned);
   } catch (err) {
     console.error(err);

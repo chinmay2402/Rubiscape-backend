@@ -1,5 +1,6 @@
 const Review = require("../models/Review");
 const ReviewLog = require("../models/ReviewLog");
+const User = require("../models/User");
 
 // CREATE REVIEW
 exports.createReview = async (req, res) => {
@@ -76,6 +77,7 @@ exports.lockReview = async (req, res) => {
       reviewId: review._id,
       action: "locked",
       performedBy: req.user.id,
+      assignedTo: review.assignedTo,
       role: "reviewer",
       snapshot: {
         aiPrompt: review.aiPrompt,
@@ -130,6 +132,7 @@ exports.unlockReview = async (req, res) => {
       reviewId: review._id,
       action: "unlocked",
       performedBy: req.user.id,
+      assignedTo: review.assignedTo,
       role: req.user.role,
       snapshot: {
         aiPrompt: review.aiPrompt,
@@ -182,6 +185,7 @@ exports.submitReview = async (req, res) => {
       action: decision,
       comment,
       performedBy: req.user.id,
+      assignedTo: review.assignedTo,
       role: "reviewer",
       snapshot: {
         aiPrompt: review.aiPrompt,
@@ -201,7 +205,8 @@ exports.submitReview = async (req, res) => {
 exports.getLogs = async (req, res) => {
   try {
     const logs = await ReviewLog.find({ reviewId: req.params.id })
-      .populate("performedBy", "name role");
+      .populate("performedBy", "name role")
+      .populate("assignedTo", "name role");
     res.json(logs);
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch logs" });
