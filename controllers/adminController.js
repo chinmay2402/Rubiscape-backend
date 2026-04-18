@@ -37,6 +37,22 @@ exports.getReviewerStats = async (req, res) => {
       }
     ]);
 
+    // 🔥 Calculate Global Summary (includes unassigned tasks)
+    const globalTotals = await Review.aggregate([
+      {
+        $group: {
+          _id: null,
+          total: { $sum: 1 },
+          approved: { $sum: { $cond: [{ $eq: ["$status.state", "approved"] }, 1, 0] } },
+          rejected: { $sum: { $cond: [{ $eq: ["$status.state", "rejected"] }, 1, 0] } },
+          pending: { $sum: { $cond: [{ $eq: ["$status.state", "pending"] }, 1, 0] } },
+          under_review: { $sum: { $cond: [{ $eq: ["$status.state", "under_review"] }, 1, 0] } }
+        }
+      }
+    ]);
+
+    const summary = globalTotals[0] || { total: 0, approved: 0, rejected: 0, pending: 0, under_review: 0 };
+
     const result = reviewers.map((reviewer) => {
       const stat = stats.find(
         (s) => s._id?.toString() === reviewer._id.toString()
@@ -54,7 +70,7 @@ exports.getReviewerStats = async (req, res) => {
       };
     });
 
-    res.json(result);
+    res.json({ reviewers: result, summary });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch stats" });
