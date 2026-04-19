@@ -26,6 +26,42 @@ exports.createReview = async (req, res) => {
   }
 };
 
+// BULK CREATE REVIEWS
+exports.bulkCreateReviews = async (req, res) => {
+  try {
+    const { tasks } = req.body;
+
+    if (!Array.isArray(tasks)) {
+      return res.status(400).json({ error: "Tasks must be an array" });
+    }
+
+    // Filter for valid rows only
+    const validTasks = tasks.filter(t => t.aiPrompt && t.aiOutput).map(t => ({
+      aiPrompt: t.aiPrompt,
+      aiOutput: t.aiOutput,
+      status: {
+        state: "pending",
+        updatedAt: new Date(),
+        comment: "Bulk upload"
+      }
+    }));
+
+    if (validTasks.length === 0) {
+      return res.status(400).json({ error: "No valid tasks found in upload" });
+    }
+
+    const createdTasks = await Review.insertMany(validTasks);
+    res.json({ 
+      count: createdTasks.length, 
+      message: `${createdTasks.length} tasks uploaded successfully` 
+    });
+
+  } catch (err) {
+    console.error("Bulk upload error:", err.message);
+    res.status(500).json({ error: "Bulk upload failed" });
+  }
+};
+
 // GET REVIEWER TASKS
 exports.getReviewerTasks = async (req, res) => {
   try {
