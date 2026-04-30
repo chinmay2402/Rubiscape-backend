@@ -7,7 +7,8 @@ const {
   getAllTasks,
   adminModify,
   reassign,
-  getUnassignedTasks
+  getUnassignedTasks,
+  getUserLogs
 } = require("../controllers/adminController");
 
 const auth = require("../middleware/auth");
@@ -15,6 +16,7 @@ const auth = require("../middleware/auth");
 router.get("/stats", auth, getReviewerStats);
 router.get("/unassigned", auth, getUnassignedTasks);
 router.get("/tasks", auth, getAllTasks);
+router.get("/user-logs", auth, getUserLogs);
 
 // 🔥 NEW ROUTE
 router.get("/:reviewerId/details", auth, getReviewerDetails);

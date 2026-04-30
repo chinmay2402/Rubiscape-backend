@@ -1,6 +1,7 @@
 const Review = require("../models/Review");
 const ReviewLog = require("../models/ReviewLog");
 const User = require("../models/User");
+const UserLog = require("../models/UserLog");
 
 // ==========================
 // ✅ 1. ADMIN STATS
@@ -269,6 +270,7 @@ exports.getUnassignedTasks = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch unassigned tasks" });
   }
 };
+
 // ==========================
 // ✅ 6. GET ALL TASKS (Filter by Status)
 // ==========================
@@ -291,5 +293,78 @@ exports.getAllTasks = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch tasks" });
+  }
+};
+
+// ==========================
+// ✅ 7. GET USER LOGS (Aggregated into Sessions)
+// ==========================
+exports.getUserLogs = async (req, res) => {
+  try {
+    const logs = await UserLog.find().sort({ userId: 1, createdAt: 1 });
+    
+    const sessions = [];
+    const activeLogins = {}; // Track latest login for each user
+
+    logs.forEach(log => {
+      const key = `${log.userId}`;
+      
+      if (log.action === "login") {
+        // If there was a previous login without logout, push it as "Still Active" or "Ended Abruptly"
+        if (activeLogins[key]) {
+          sessions.push({
+            ...activeLogins[key],
+            logoutAt: null, // Indicating it was replaced or never ended
+            status: "Incomplete"
+          });
+        }
+        activeLogins[key] = {
+          userId: log.userId,
+          userName: log.userName,
+          userEmail: log.userEmail,
+          loginAt: log.createdAt,
+          ipAddress: log.ipAddress,
+          userAgent: log.userAgent,
+        };
+      } else if (log.action === "logout") {
+        if (activeLogins[key]) {
+          sessions.push({
+            ...activeLogins[key],
+            logoutAt: log.createdAt,
+            status: "Completed"
+          });
+          delete activeLogins[key];
+        } else {
+          // Logout without a recorded login (rare but possible if logs were cleared)
+          sessions.push({
+            userId: log.userId,
+            userName: log.userName,
+            userEmail: log.userEmail,
+            loginAt: null,
+            logoutAt: log.createdAt,
+            status: "Logout Only",
+            ipAddress: log.ipAddress,
+            userAgent: log.userAgent,
+          });
+        }
+      }
+    });
+
+    // Add remaining active logins
+    Object.values(activeLogins).forEach(login => {
+      sessions.push({
+        ...login,
+        logoutAt: null,
+        status: "Active"
+      });
+    });
+
+    // Sort by login time descending (newest first)
+    sessions.sort((a, b) => new Date(b.loginAt || b.logoutAt) - new Date(a.loginAt || a.logoutAt));
+
+    res.json(sessions);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch user logs" });
   }
 };

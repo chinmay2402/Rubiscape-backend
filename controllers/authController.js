@@ -1,5 +1,6 @@
 // controllers/authController.js
 const User = require("../models/User");
+const UserLog = require("../models/UserLog");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 
@@ -17,7 +18,44 @@ exports.login = async (req, res) => {
     process.env.JWT_SECRET
   );
 
+  // Log the login event
+  try {
+    await UserLog.create({
+      userId: user._id,
+      userName: user.name,
+      userEmail: user.email,
+      action: "login",
+      ipAddress: req.ip,
+      userAgent: req.get("User-Agent")
+    });
+  } catch (logErr) {
+    console.error("Failed to log login:", logErr);
+  }
+
   res.json({ token, user });
+};
+
+exports.logout = async (req, res) => {
+  const { userId } = req.body;
+  
+  if (!userId) return res.status(400).json({ msg: "User ID required" });
+
+  try {
+    const user = await User.findById(userId);
+    if (user) {
+      await UserLog.create({
+        userId: user._id,
+        userName: user.name,
+        userEmail: user.email,
+        action: "logout",
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent")
+      });
+    }
+    res.json({ msg: "Logged out successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
 
 
