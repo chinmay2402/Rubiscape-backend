@@ -28,6 +28,16 @@ exports.login = async (req, res) => {
       ipAddress: req.ip,
       userAgent: req.get("User-Agent")
     });
+
+    // Emit real-time update to all connected clients
+    const io = req.app.get("io");
+    io.emit("userActivity", {
+      action: "login",
+      userId: user._id,
+      userName: user.name,
+      userEmail: user.email,
+      timestamp: new Date()
+    });
   } catch (logErr) {
     console.error("Failed to log login:", logErr);
   }
@@ -50,6 +60,16 @@ exports.logout = async (req, res) => {
         action: "logout",
         ipAddress: req.ip,
         userAgent: req.get("User-Agent")
+      });
+
+      // Emit real-time update to all connected clients
+      const io = req.app.get("io");
+      io.emit("userActivity", {
+        action: "logout",
+        userId: user._id,
+        userName: user.name,
+        userEmail: user.email,
+        timestamp: new Date()
       });
     }
     res.json({ msg: "Logged out successfully" });
