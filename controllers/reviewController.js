@@ -18,6 +18,13 @@ exports.createReview = async (req, res) => {
       }
     });
 
+    // Emit WebSocket event for real-time updates
+    const io = req.app.get("io");
+    io.emit("reviewCreated", {
+      reviewId: review._id,
+      status: review.status
+    });
+
     res.json(review);
 
   } catch (err) {
@@ -54,6 +61,13 @@ exports.bulkCreateReviews = async (req, res) => {
     res.json({ 
       count: createdTasks.length, 
       message: `${createdTasks.length} tasks uploaded successfully` 
+    });
+
+    // Emit WebSocket event for real-time updates
+    const io = req.app.get("io");
+    io.emit("reviewsCreated", {
+      count: createdTasks.length,
+      reviewIds: createdTasks.map(task => task._id)
     });
 
   } catch (err) {

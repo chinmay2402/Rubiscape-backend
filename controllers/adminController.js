@@ -204,6 +204,15 @@ exports.adminModify = async (req, res) => {
       }
     });
 
+    // Emit WebSocket event for real-time updates
+    const io = req.app.get("io");
+    io.emit("reviewUpdated", {
+      reviewId: review._id,
+      status: review.status,
+      assignedTo: review.assignedTo,
+      modifiedBy: "admin"
+    });
+
     res.json({ msg: "Updated by admin", review });
   } catch (err) {
     console.error(err);
@@ -249,6 +258,15 @@ exports.reassign = async (req, res) => {
         aiOutput: review.aiOutput,
         status: review.status
       }
+    });
+
+    // Emit WebSocket event for real-time updates
+    const io = req.app.get("io");
+    io.emit("reviewUpdated", {
+      reviewId: review._id,
+      status: review.status,
+      assignedTo: reviewerId,
+      modifiedBy: "admin"
     });
 
     res.json({ msg: "Reassigned" });

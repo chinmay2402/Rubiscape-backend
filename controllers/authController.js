@@ -91,5 +91,16 @@ exports.register = async (req, res) => {
     role
   });
 
+  // Emit real-time update for new user creation
+  const io = req.app.get("io");
+  io.emit("userActivity", {
+    action: "user_created",
+    userId: user._id,
+    userName: user.name,
+    userEmail: user.email,
+    userRole: user.role,
+    timestamp: new Date()
+  });
+
   res.json(user);
 };
