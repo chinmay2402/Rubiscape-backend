@@ -7,8 +7,14 @@ const { Server } = require("socket.io");
 
 const app = express();
 const cors = require("cors");
-app.use(cors());
+const cookieParser = require("cookie-parser");
+
+app.use(cors({
+  origin: process.env.FRONTEND_URL || "http://localhost:5173",
+  credentials: true
+}));
 app.use(express.json());
+app.use(cookieParser());
 
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("MongoDB Connected"))
@@ -29,7 +35,10 @@ app.get("/", (req, res) => {
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  cors: { origin: "*" }
+  cors: { 
+    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    credentials: true
+  }
 });
 
 app.set("io", io);
